@@ -31,7 +31,7 @@ All versions require **Fabric API**.
 | `/farm spawn set <name> <pos1> <pos2> <mob> [rate]` | Everyone |
 | `/farm spawn del <name>` | Everyone |
 | `/farm spawn list` | Everyone |
-| `/farm give [target] [item] [count]` | Restricted (craftkal1 + OP) |
+| `/farm give [target] [item] [count]` | OP |
 | `/farm set spawn <true\|false>` | OP |
 | `/farm set weather <rain\|clear\|on\|off>` | OP |
 | `/farm set spawn_dimension [pos]` | OP |
