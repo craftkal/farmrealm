@@ -1,8 +1,8 @@
 # Farmrealm v1.0.0
 
-Custom "Farm" dimension for Fabric — mob farm/grinder with 100% command-driven spawning.
+Custom **Farm** dimension for Fabric — mob farm/grinder with 100% command-driven spawning.
 
-## Versi
+## Versions
 
 | File | Minecraft | Fabric Loader | Java |
 |---|---|---|---|
@@ -10,31 +10,36 @@ Custom "Farm" dimension for Fabric — mob farm/grinder with 100% command-driven
 | `farmrealm-1.21.11.jar` | 1.21.11 | >=0.15.11 | >=21 |
 | `farmrealm-1.21.1.jar` | 1.21.1 | >=0.15.11 | >=21 |
 
-Semua versi membutuhkan **Fabric API**.
+All versions require **Fabric API**.
 
-## Fitur
+## Features
 
-- Dimensi `/farm` — langit hitam, full-bright, platform stone 5×5
-- Spawn alami **dinonaktifkan** — mob hanya lewat `/farm spawn set`
-- Hujan item otomatis (common/uncommon/rare)
+- `/farm` dimension — black sky, full-bright, 5×5 stone platform
+- Natural spawns **disabled** — mobs only via `/farm spawn set`
+- Automatic item rain (common / uncommon / rare loot)
 - Growth acceleration (wheat, carrot, potato, beetroot, sugar cane, melon, pumpkin)
-- Anti-void (Levitation + Slow Falling)
-- Data persist lewat world save (tahan restart)
+- Anti-void protection (Levitation + Slow Falling)
+- Persistent data across world restarts
+- Hardcore compatible
 
-## Command
+## Commands
 
 | Command | Permission |
 |---|---|
-| `/farm`, `/farm join` | Semua pemain |
-| `/farm quit`, `/farm logout` | Semua pemain |
-| `/farm spawn set <nama> <pos1> <pos2> <mob> [rate]` | Semua pemain |
-| `/farm spawn del <nama>` | Semua pemain |
-| `/farm spawn list` | Semua pemain |
-| `/farm give [target] [item] [count]` | Terbatas (craftkal1 + OP) |
+| `/farm`, `/farm join` | Everyone |
+| `/farm quit`, `/farm logout` | Everyone |
+| `/farm spawn set <name> <pos1> <pos2> <mob> [rate]` | Everyone |
+| `/farm spawn del <name>` | Everyone |
+| `/farm spawn list` | Everyone |
+| `/farm give [target] [item] [count]` | Restricted (craftkal1 + OP) |
 | `/farm set spawn <true\|false>` | OP |
 | `/farm set weather <rain\|clear\|on\|off>` | OP |
 | `/farm set spawn_dimension [pos]` | OP |
 | `/farm set growth <crop> <stages_per_tick>` | OP |
+
+## License
+
+Apache-2.0
 
 ## Author
 
