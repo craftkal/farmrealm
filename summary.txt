@@ -1,0 +1,1 @@
+Farmrealm — Custom Farm dimension mod for Fabric. Disables natural mob spawning, adds command-driven spawn areas, item rain, growth acceleration, anti-void protection, and a full-bright void dimension. Supports Minecraft 26.1.2, 1.21.11, and 1.21.1. Requires Fabric API. By craftkal.

